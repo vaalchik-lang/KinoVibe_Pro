@@ -24,6 +24,7 @@ jobs:
           cd client
           flutter create . --platforms android --force
           flutter pub get
+          # Записываем лог прямо в корень репозитория
           flutter build apk --release > ../build_error.log 2>&1
         continue-on-error: true
 
@@ -33,23 +34,24 @@ jobs:
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
         run: |
           pip install requests
+          # Запуск из корня, где лежит лог
           python .system/agent.py
-          # Загружаем статус изменений
-          source agent_status.env
           
-          if [ "$CHANGES_DETECTED" = "true" ]; then
-            git config --global user.name "KinoVibe-AI-Agent"
-            git config --global user.email "agent@kinovibe.ai"
-            git add client/pubspec.yaml
-            git commit -m "Agent [Gemini 2.5 Flash]: Applied version patch"
-            git push origin main
-            
-            # Вторая попытка билда
-            cd client
-            flutter pub get
-            flutter build apk --release
+          if [ -f agent_status.env ]; then
+            source agent_status.env
+            if [ "$CHANGES_DETECTED" = "true" ]; then
+              git config --global user.name "KinoVibe-AI-Agent"
+              git config --global user.email "agent@kinovibe.ai"
+              git add client/pubspec.yaml
+              git commit -m "Agent [Gemini 2.5 Flash]: Auto-repair applied"
+              git push origin main
+              cd client && flutter build apk --release
+            else
+              echo "AGENT: Автоматическое исправление невозможно."
+              exit 1
+            fi
           else
-            echo "AGENT: Ошибка не поддается автоматическому лечению через pubspec.yaml"
+            echo "AGENT: Критическая ошибка инициализации агента."
             exit 1
           fi
 

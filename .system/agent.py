@@ -1,7 +1,6 @@
 import os
 import requests
 import json
-import subprocess
 
 class SmartAgent:
     def __init__(self):
@@ -27,40 +26,39 @@ class SmartAgent:
         return None
 
 def main():
-    if not os.path.exists("build_error.log"):
-        print("AGENT: Лог ошибки не найден.")
+    # Ищем лог в корне или в текущей папке
+    log_path = "build_error.log"
+    
+    if not os.path.exists(log_path):
+        print(f"AGENT: Лог {log_path} не найден. Работа в режиме диагностики без логов.")
+        log_data = "No log file found. Check environment scaffold."
+    else:
+        with open(log_path, "r") as f:
+            log_data = f.read()[-4000:]
+
+    # Всегда создаем файл статуса в начале, чтобы избежать ошибок workflow
+    with open("agent_status.env", "w") as f:
+        f.write("CHANGES_DETECTED=false\n")
+
+    pub_path = "client/pubspec.yaml"
+    if not os.path.exists(pub_path):
+        print("AGENT: pubspec.yaml не найден.")
         return
 
     agent = SmartAgent()
-    with open("build_error.log", "r") as f:
-        log_data = f.read()[-4000:]
-
-    with open("client/pubspec.yaml", "r") as f:
+    with open(pub_path, "r") as f:
         current_pub = f.read()
 
-    prompt = f"""
-    PROJECT: KINOVIBE
-    ROLE: Senior Flutter Engineer / Agent
-    ERROR: {log_data}
-    FILE: {current_pub}
-    TASK: Проанализируй ошибку. Если это конфликт версий в pubspec.yaml, верни исправленный файл целиком. 
-    Если причина в другом (Gradle, Java, SDK), напиши кратко 'NOT_A_PUBSPEC_ERROR'.
-    ОТВЕТ: Только код или статус.
-    """
+    prompt = f"ERROR LOG:\n{log_data}\n\nCURRENT PUBSPEC:\n{current_pub}\n\nFix version conflicts. Output ONLY clean code."
     
     fix = agent.ask_gemini(prompt)
     
     if fix and "name:" in fix and fix.strip() != current_pub.strip():
-        with open("client/pubspec.yaml", "w") as f:
+        with open(pub_path, "w") as f:
             f.write(fix)
-        print("AGENT: Обнаружено решение. Файл обновлен.")
-        # Создаем флаг для GitHub Actions, что изменения ЕСТЬ
         with open("agent_status.env", "w") as f:
-            f.write("CHANGES_DETECTED=true")
-    else:
-        print("AGENT: Изменений не требуется или ошибка вне pubspec.yaml.")
-        with open("agent_status.env", "w") as f:
-            f.write("CHANGES_DETECTED=false")
+            f.write("CHANGES_DETECTED=true\n")
+        print("AGENT: Решение применено.")
 
 if __name__ == "__main__":
     main()
