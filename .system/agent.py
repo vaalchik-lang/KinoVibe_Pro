@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import re
 
 class SmartAgent:
     def __init__(self):
@@ -8,12 +9,17 @@ class SmartAgent:
         self.key_pool = [k.strip() for k in raw_keys.split(",") if k.strip()]
         self.current_key_idx = 0
 
+    def clean_code(self, text):
+        # Удаляем Markdown блоки ```yaml или ``` и закрывающие теги
+        cleaned = re.sub(r'```[a-zA-Z]*\n', '', text)
+        cleaned = cleaned.replace('```', '')
+        return cleaned.strip()
+
     def ask_gemini(self, prompt):
         while self.current_key_idx < len(self.key_pool):
             key = self.key_pool[self.current_key_idx]
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
+            url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=){key}"
             try:
-                print(f"AGENT: Запрос к Gemini 2.5 Flash (Ключ {self.current_key_idx})...")
                 response = requests.post(url, json={
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"temperature": 0.1}
@@ -26,39 +32,34 @@ class SmartAgent:
         return None
 
 def main():
-    # Ищем лог в корне или в текущей папке
     log_path = "build_error.log"
-    
+    with open("agent_status.env", "w") as f:
+        f.write("CHANGES_DETECTED=false\n")
+
     if not os.path.exists(log_path):
-        print(f"AGENT: Лог {log_path} не найден. Работа в режиме диагностики без логов.")
-        log_data = "No log file found. Check environment scaffold."
+        log_data = "Unknown error. Check syntax."
     else:
         with open(log_path, "r") as f:
             log_data = f.read()[-4000:]
 
-    # Всегда создаем файл статуса в начале, чтобы избежать ошибок workflow
-    with open("agent_status.env", "w") as f:
-        f.write("CHANGES_DETECTED=false\n")
-
     pub_path = "client/pubspec.yaml"
-    if not os.path.exists(pub_path):
-        print("AGENT: pubspec.yaml не найден.")
-        return
-
-    agent = SmartAgent()
     with open(pub_path, "r") as f:
         current_pub = f.read()
 
-    prompt = f"ERROR LOG:\n{log_data}\n\nCURRENT PUBSPEC:\n{current_pub}\n\nFix version conflicts. Output ONLY clean code."
+    agent = SmartAgent()
+    prompt = f"ERROR:\n{log_data}\n\nFILE:\n{current_pub}\n\nTask: Fix the file. Return ONLY the code. NO Markdown."
     
-    fix = agent.ask_gemini(prompt)
-    
-    if fix and "name:" in fix and fix.strip() != current_pub.strip():
-        with open(pub_path, "w") as f:
-            f.write(fix)
-        with open("agent_status.env", "w") as f:
-            f.write("CHANGES_DETECTED=true\n")
-        print("AGENT: Решение применено.")
+    raw_fix = agent.ask_gemini(prompt)
+    if raw_fix:
+        # ПРИМЕНЯЕМ ОЧИСТКУ
+        fix = agent.clean_code(raw_fix)
+        
+        if "name:" in fix and fix != current_pub.strip():
+            with open(pub_path, "w") as f:
+                f.write(fix)
+            with open("agent_status.env", "w") as f:
+                f.write("CHANGES_DETECTED=true\n")
+            print("AGENT: Код очищен и применен.")
 
 if __name__ == "__main__":
     main()
