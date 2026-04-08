@@ -13,6 +13,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -24,7 +30,6 @@ jobs:
           cd client
           flutter create . --platforms android --force
           flutter pub get
-          # Записываем лог прямо в корень репозитория
           flutter build apk --release > ../build_error.log 2>&1
         continue-on-error: true
 
@@ -34,7 +39,6 @@ jobs:
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
         run: |
           pip install requests
-          # Запуск из корня, где лежит лог
           python .system/agent.py
           
           if [ -f agent_status.env ]; then
@@ -45,13 +49,16 @@ jobs:
               git add client/pubspec.yaml
               git commit -m "Agent [Gemini 2.5 Flash]: Auto-repair applied"
               git push origin main
-              cd client && flutter build apk --release
+              
+              # КРИТИЧЕСКИЙ ФИКС: Используем $FLUTTER_ROOT для вызова
+              cd client
+              $FLUTTER_ROOT/bin/flutter pub get
+              $FLUTTER_ROOT/bin/flutter build apk --release
             else
-              echo "AGENT: Автоматическое исправление невозможно."
+              echo "AGENT: Решение не найдено."
               exit 1
             fi
           else
-            echo "AGENT: Критическая ошибка инициализации агента."
             exit 1
           fi
 
