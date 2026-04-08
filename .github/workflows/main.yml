@@ -1,0 +1,67 @@
+name: KINOVIBE_TERMINAL_BUILD
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: 'yes'
+          MARIADB_DATABASE: 'agent_core'
+        ports:
+          - 3306:3306
+        options: --health-cmd="mariadb-admin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Setup Python & DB
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mariadb-client
+          pip install mysql-connector-python requests
+          mysql -h 127.0.0.1 -u root agent_core < .system/schema.sql
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        id: flutter_build
+        continue-on-error: true
+        run: flutter build apk --release > build_output.log 2>&1
+
+      - name: Agent Intervention (Auto-Fix)
+        if: steps.flutter_build.outcome == 'failure'
+        env:
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+        run: |
+          echo ">> [CRITICAL]: Билд упал. Агент анализирует логи..."
+          LOG_TAIL=$(tail -n 100 build_output.log)
+          python .system/meta_agent.py "$LOG_TAIL"
+          exit 1
+
+      - name: Upload APK
+        if: steps.flutter_build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinovibe-release
+          path: build/app/outputs/flutter-apk/app-release.apk
