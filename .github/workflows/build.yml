@@ -1,4 +1,4 @@
-name: Build APK
+name: Flutter Build APK (Self-Healing)
 
 on:
   push:
@@ -11,22 +11,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.3'
           channel: 'stable'
 
-      - name: Install dependencies
-        run: flutter pub get
-        working-directory: ./client
+      - name: Repair and Scaffold Project
+        run: |
+          cd client
+          # Облачный агент создает недостающую структуру Android
+          flutter create . --platforms android --force
+          # Возвращаем наши актуальные зависимости, если они затерлись
+          flutter pub get
 
-      - name: Build APK (release)
-        run: flutter build apk --release
-        working-directory: ./client
+      - name: Build APK
+        run: |
+          cd client
+          flutter build apk --release
 
-      - name: Upload APK artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kinovibe-release
+          name: kinovibe-release-apk
           path: client/build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 7
