@@ -27,21 +27,35 @@ jobs:
           flutter build apk --release > ../build_error.log 2>&1
         continue-on-error: true
 
-      - name: AI Agent Self-Healing
+      - name: AI Agent Diagnosis
         if: steps.build.outcome == 'failure'
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
         run: |
           pip install requests
           python .system/agent.py
+          # Загружаем статус изменений
+          source agent_status.env
           
-          git config --global user.name "KinoVibe-AI-Agent"
-          git config --global user.email "agent@kinovibe.ai"
-          git add client/pubspec.yaml
-          git commit -m "Agent [Gemini 2.5 Flash]: Auto-fix applied to pubspec.yaml"
-          git push origin main
-          
-          # Повторная попытка после ИИ-фикса
-          cd client
-          flutter pub get
-          flutter build apk --release
+          if [ "$CHANGES_DETECTED" = "true" ]; then
+            git config --global user.name "KinoVibe-AI-Agent"
+            git config --global user.email "agent@kinovibe.ai"
+            git add client/pubspec.yaml
+            git commit -m "Agent [Gemini 2.5 Flash]: Applied version patch"
+            git push origin main
+            
+            # Вторая попытка билда
+            cd client
+            flutter pub get
+            flutter build apk --release
+          else
+            echo "AGENT: Ошибка не поддается автоматическому лечению через pubspec.yaml"
+            exit 1
+          fi
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinovibe-release-apk
+          path: client/build/app/outputs/flutter-apk/app-release.apk
