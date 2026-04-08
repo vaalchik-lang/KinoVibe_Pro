@@ -1,0 +1,36 @@
+name: Flutter Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0' # Или актуальная версия
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: cd client && flutter pub get
+
+      - name: Build APK
+        run: cd client && flutter build apk --release
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: kinovibe-release-apk
+          path: client/build/app/outputs/flutter-apk/app-release.apk
