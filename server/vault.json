@@ -1,0 +1,19 @@
+{
+  "gemini_keys": [
+    "GEMINI_KEY_1_HERE",
+    "GEMINI_KEY_2_HERE",
+    "GEMINI_KEY_3_HERE",
+    "GEMINI_KEY_4_HERE",
+    "GEMINI_KEY_5_HERE",
+    "GEMINI_KEY_6_HERE",
+    "GEMINI_KEY_7_HERE"
+  ],
+  "groq_keys": [
+    "GROQ_KEY_1_HERE",
+    "GROQ_KEY_2_HERE",
+    "GROQ_KEY_3_HERE",
+    "GROQ_KEY_4_HERE",
+    "GROQ_KEY_5_HERE"
+  ],
+  "vk_token": "VK_TOKEN_HERE"
+}
