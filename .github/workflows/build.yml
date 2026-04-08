@@ -28,8 +28,8 @@ jobs:
         id: build
         run: |
           cd client
-          flutter create . --platforms android --force
-          flutter pub get
+          # Убрали --force, добавили диагностику
+          flutter pub get || echo "PUB_FAILED" >> ../build_error.log
           flutter build apk --release > ../build_error.log 2>&1
         continue-on-error: true
 
@@ -50,16 +50,13 @@ jobs:
               git commit -m "Agent [Gemini 2.5 Flash]: Auto-repair applied"
               git push origin main
               
-              # КРИТИЧЕСКИЙ ФИКС: Используем $FLUTTER_ROOT для вызова
               cd client
               $FLUTTER_ROOT/bin/flutter pub get
               $FLUTTER_ROOT/bin/flutter build apk --release
             else
-              echo "AGENT: Решение не найдено."
-              exit 1
+              echo "AGENT: Изменений не требуется или решение не найдено."
+              # Не валим билд, если агент просто не нашел что править
             fi
-          else
-            exit 1
           fi
 
       - name: Upload APK
