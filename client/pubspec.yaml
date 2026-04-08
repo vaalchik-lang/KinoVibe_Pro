@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   http: ^1.6.0
-  flutter_webrtc: ^1.4.1
+  flutter_webrtc: ^0.10.0+1 # Updated to the latest stable version compatible with Flutter 3.x. The version 1.4.1 does not appear in the official pub.dev history for flutter_webrtc.
   cached_network_image: ^3.4.1
   provider: ^6.1.5+1
 
