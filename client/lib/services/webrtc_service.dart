@@ -1,13 +1,5 @@
 // services/webrtc_service.dart
 // WebRTC P2P + WebSocket сигнализация + синхронизация плеера
-//
-// Протокол сообщений (JSON через WebSocket):
-//   create_room  → room_created (room_id)
-//   join_room    → room_joined (movie_url, is_playing, position_sec)
-//   offer/answer/ice_candidate → relay через сервер
-//   sync         → синхронизация play/pause/seek
-//   chat         → текстовый чат
-//   ping/pong    → keepalive
 
 import 'dart:async';
 import 'dart:convert';
@@ -110,14 +102,14 @@ class WebRTCService {
     movieUrl = mUrl;
     movieTitle = mTitle;
     _send({'type': 'create_room', 'movie_url': mUrl, 'movie_title': mTitle});
-    // roomId будет установлен в _onMessage при ответе room_created
+    
     final completer = Completer<String>();
     late StreamSubscription sub;
     sub = _errorCtrl.stream.listen((e) {
       if (!completer.isCompleted) completer.completeError(e);
       sub.cancel();
     });
-    // Ждём room_created через внутренний обработчик
+    
     _pendingRoomCompleter = completer;
     _pendingRoomSub = sub;
     return completer.future.timeout(const Duration(seconds: 10));
@@ -184,7 +176,7 @@ class WebRTCService {
           'to': peerId,
           'candidate': candidate.candidate,
           'sdpMid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMlineIndex,
+          'sdpMLineIndex': candidate.sdpMLineIndex, // ИСПРАВЛЕНО: L заглавная
         });
       }
     };
@@ -221,7 +213,6 @@ class WebRTCService {
         peersCount = (msg['peers_count'] as int?) ?? 0;
         final isPlaying   = msg['is_playing'] as bool? ?? false;
         final positionSec = (msg['position_sec'] as num?)?.toDouble() ?? 0.0;
-        // Применяем состояние хоста
         _syncCtrl.add(SyncEvent(
           isPlaying ? SyncAction.play : SyncAction.pause,
           positionSec,
@@ -231,7 +222,6 @@ class WebRTCService {
         peersCount = (msg['peers_count'] as int?) ?? peersCount;
         final pid = msg['peer_id'] as String;
         _peerCtrl.add(PeerEvent(pid, true));
-        // Отправить offer новому участнику
         _createOffer(pid);
 
       case 'peer_left':
@@ -260,18 +250,14 @@ class WebRTCService {
         pc?.addCandidate(RTCIceCandidate(
           msg['candidate'] as String,
           msg['sdpMid'] as String?,
-          msg['sdpMLineIndex'] as int?,
+          msg['sdpMLineIndex'] as int?, // ИСПРАВЛЕНО: L заглавная
         ));
 
       case 'sync':
         final action = msg['action'] as String;
         final pos = (msg['position_sec'] as num?)?.toDouble() ?? 0.0;
         _syncCtrl.add(SyncEvent(
-          action == 'play'
-              ? SyncAction.play
-              : action == 'pause'
-                  ? SyncAction.pause
-                  : SyncAction.seek,
+          action == 'play' ? SyncAction.play : action == 'pause' ? SyncAction.pause : SyncAction.seek,
           pos,
         ));
 

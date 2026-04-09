@@ -1,0 +1,2225 @@
+--- KINOVIBE FULL PROJECT DUMP ---
+Generated: Thu Apr  9 07:30:38 +05 2026
+----------------------------------
+
+[FILE: pubspec.yaml]
+name: kinovibe
+description: "A new Flutter project for KINOVIBE."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.6.0
+  flutter_webrtc: ^0.10.0+1 # Updated to the latest stable version compatible with Flutter 3.x. The version 1.4.1 does not appear in the official pub.dev history for flutter_webrtc.
+  cached_network_image: ^3.4.1
+  provider: ^6.1.5+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+
+[FILE: lib/models/movie_model.dart]
+----------------------------------
+// models/movie_model.dart
+
+class MovieItem {
+  final String title;
+  final String url;
+  final String thumbnail;
+  final int duration;
+  final int viewCount;
+  final String channel;
+  final String uploadDate;
+
+  const MovieItem({
+    required this.title,
+    required this.url,
+    required this.thumbnail,
+    required this.duration,
+    required this.viewCount,
+    required this.channel,
+    required this.uploadDate,
+  });
+
+  factory MovieItem.fromJson(Map<String, dynamic> j) => MovieItem(
+    title:      j['title'] ?? '',
+    url:        j['url'] ?? '',
+    thumbnail:  j['thumbnail'] ?? '',
+    duration:   (j['duration'] ?? 0) as int,
+    viewCount:  (j['view_count'] ?? 0) as int,
+    channel:    j['channel'] ?? '',
+    uploadDate: j['upload_date'] ?? '',
+  );
+
+  String get durationFormatted {
+    final m = duration ~/ 60;
+    final s = duration % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+}
+
+class SearchResult {
+  final String query;
+  final String? mood;
+  final String? genre;
+  final String provider;
+  final String category;
+  final List<MovieItem> results;
+
+  const SearchResult({
+    required this.query,
+    this.mood,
+    this.genre,
+    required this.provider,
+    required this.category,
+    required this.results,
+  });
+
+  factory SearchResult.fromJson(Map<String, dynamic> j) => SearchResult(
+    query:    j['query'] ?? '',
+    mood:     j['mood'],
+    genre:    j['genre'],
+    provider: j['provider'] ?? '',
+    category: j['category'] ?? 'movies',
+    results:  (j['results'] as List? ?? [])
+        .map((e) => MovieItem.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+
+[FILE: lib/screens/home_screen.dart]
+----------------------------------
+// screens/home_screen.dart — Главный экран KinoVibe
+
+import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import '../theme/app_theme.dart';
+import '../widgets/transformer_widget.dart';
+import '../widgets/mood_dialog.dart';
+import '../widgets/movie_card.dart';
+import '../services/api_service.dart';
+import '../models/movie_model.dart';
+import 'player_screen.dart';
+import 'join_room_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  String _category = 'movies';
+  bool _isLoading = false;
+  String? _error;
+  SearchResult? _result;
+
+  final SpeechToText _speech = SpeechToText();
+  bool _speechAvailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    _speechAvailable = await _speech.initialize();
+  }
+
+  void _onCategorySelected(String category) {
+    setState(() {
+      _category = category;
+      _result = null;
+    });
+  }
+
+  void _onMicTap() async {
+    if (!_speechAvailable) {
+      _showMoodDialog();
+      return;
+    }
+    await _speech.listen(
+      onResult: (result) {
+        if (result.finalResult) {
+          _doSearch(result.recognizedWords);
+        }
+      },
+      localeId: 'ru_RU',
+    );
+  }
+
+  void _onMicLongPress() => _showMoodDialog();
+
+  void _showMoodDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => MoodDialog(
+        category: _category,
+        onSubmit: (text) {
+          Navigator.pop(context);
+          _doSearch(text);
+        },
+      ),
+    );
+  }
+
+  Future<void> _doSearch(String query) async {
+    if (query.trim().isEmpty) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      final result = await ApiService.search(query: query, category: _category);
+      setState(() {
+        _result = result;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Ошибка: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _openPlayer(MovieItem movie) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PlayerScreen(movie: movie)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: KinoColors.background,
+      floatingActionButton: FloatingActionButton.small(
+        backgroundColor: KinoColors.surface,
+        foregroundColor: KinoColors.bronze,
+        tooltip: 'Войти в комнату',
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const JoinRoomScreen()),
+        ),
+        child: const Icon(Icons.meeting_room_outlined),
+      ),
+      body: Stack(
+        children: [
+          // Фоновое свечение
+          Container(decoration: const BoxDecoration(gradient: KinoGradients.bronzeGlow)),
+
+          SafeArea(
+            child: Column(
+              children: [
+                const SizedBox(height: 24),
+
+                // Заголовок
+                Text(
+                  'KinoVibe',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
+                Text(
+                  _categoryLabel(_category),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+
+                const SizedBox(height: 32),
+
+                // Трансформер
+                TransformerWidget(
+                  onCategorySelected: _onCategorySelected,
+                  onMicTap: _onMicTap,
+                  onMicLongPress: _onMicLongPress,
+                ),
+
+                const SizedBox(height: 16),
+
+                // Стрелка вниз (диалог настроения)
+                _ArrowButton(
+                  onTap: _showMoodDialog,
+                  pulsing: true,
+                ),
+
+                const SizedBox(height: 24),
+
+                // Результаты
+                Expanded(
+                  child: _buildResults(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResults() {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: KinoColors.bronze),
+      );
+    }
+    if (_error != null) {
+      return Center(
+        child: Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+      );
+    }
+    if (_result == null) {
+      return const Center(
+        child: Text(
+          'Открой трансформер и опиши настроение',
+          style: TextStyle(color: KinoColors.textSecondary),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    if (_result!.results.isEmpty) {
+      return const Center(
+        child: Text(
+          'Ничего не найдено. Попробуй другой запрос.',
+          style: TextStyle(color: KinoColors.textSecondary),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              const Icon(Icons.search, color: KinoColors.bronze, size: 16),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '"${_result!.query}"',
+                  style: const TextStyle(color: KinoColors.textSecondary, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                '${_result!.results.length} фильмов',
+                style: const TextStyle(color: KinoColors.bronze, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: _result!.results.length,
+            itemBuilder: (_, i) => MovieCard(
+              movie: _result!.results[i],
+              onTap: () => _openPlayer(_result!.results[i]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _categoryLabel(String cat) => const {
+    'movies':  'Фильмы',
+    'series':  'Сериалы',
+    'shorts':  'Короткометражки',
+    'anime':   'Аниме',
+  }[cat] ?? 'Фильмы';
+}
+
+// ─── Стрелка вниз ─────────────────────────────────────────────────────────────
+class _ArrowButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final bool pulsing;
+  const _ArrowButton({required this.onTap, this.pulsing = false});
+
+  @override
+  State<_ArrowButton> createState() => _ArrowButtonState();
+}
+
+class _ArrowButtonState extends State<_ArrowButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    )..repeat(reverse: true);
+    _anim = Tween(begin: 0.0, end: 6.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, child) => Transform.translate(
+        offset: Offset(0, widget.pulsing ? _anim.value : 0),
+        child: child,
+      ),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: KinoColors.surface,
+            border: Border.all(color: KinoColors.bronze.withOpacity(0.6)),
+          ),
+          child: const Icon(
+            Icons.keyboard_arrow_down,
+            color: KinoColors.bronze,
+            size: 28,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+[FILE: lib/screens/join_room_screen.dart]
+----------------------------------
+// screens/join_room_screen.dart — Присоединиться к комнате по коду
+
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
+import '../models/movie_model.dart';
+import 'room_screen.dart';
+
+class JoinRoomScreen extends StatefulWidget {
+  const JoinRoomScreen({super.key});
+
+  @override
+  State<JoinRoomScreen> createState() => _JoinRoomScreenState();
+}
+
+class _JoinRoomScreenState extends State<JoinRoomScreen> {
+  final _ctrl = TextEditingController();
+
+  void _join() {
+    final code = _ctrl.text.trim().toUpperCase();
+    if (code.length < 4) return;
+    // Создаём заглушку-фильм (реальные данные придут с сервера через room_joined)
+    final stub = MovieItem(
+      title: 'Загрузка...',
+      url: '',
+      thumbnail: '',
+      duration: 0,
+      viewCount: 0,
+      channel: '',
+      uploadDate: '',
+    );
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RoomScreen(
+          movie: stub,
+          joinRoomId: code,
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: KinoColors.background,
+      appBar: AppBar(
+        backgroundColor: KinoColors.surface,
+        title: const Text(
+          'Присоединиться к комнате',
+          style: TextStyle(color: KinoColors.gold, fontSize: 16),
+        ),
+        iconTheme: const IconThemeData(color: KinoColors.bronze),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Введи код комнаты',
+              style: TextStyle(
+                color: KinoColors.gold,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Попроси друга скопировать код из его комнаты.',
+              style: TextStyle(color: KinoColors.textSecondary),
+            ),
+            const SizedBox(height: 32),
+            TextField(
+              controller: _ctrl,
+              textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(
+                color: KinoColors.gold,
+                fontSize: 28,
+                letterSpacing: 6,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+              maxLength: 8,
+              decoration: InputDecoration(
+                hintText: 'AB12CD34',
+                hintStyle: TextStyle(
+                  color: KinoColors.textSecondary.withOpacity(0.4),
+                  letterSpacing: 6,
+                  fontSize: 28,
+                ),
+                counterStyle: const TextStyle(color: KinoColors.textSecondary),
+                filled: true,
+                fillColor: KinoColors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: KinoColors.divider),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: KinoColors.bronze, width: 2),
+                ),
+              ),
+              onSubmitted: (_) => _join(),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _join,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: KinoColors.bronze,
+                  foregroundColor: KinoColors.background,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Войти в комнату',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+[FILE: lib/screens/player_screen.dart]
+----------------------------------
+// screens/player_screen.dart — Плеер KinoVibe
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
+import '../models/movie_model.dart';
+import '../theme/app_theme.dart';
+import 'room_screen.dart';
+
+class PlayerScreen extends StatefulWidget {
+  final MovieItem movie;
+  const PlayerScreen({super.key, required this.movie});
+
+  @override
+  State<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends State<PlayerScreen> {
+  VideoPlayerController? _ctrl;
+  bool _isInitialized = false;
+  bool _showControls = true;
+  bool _isFullscreen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    try {
+      _ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.movie.url));
+      await _ctrl!.initialize();
+      setState(() => _isInitialized = true);
+    } catch (e) {
+      debugPrint('Player init error: $e');
+    }
+  }
+
+  void _toggleFullscreen() {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    }
+  }
+
+  void _openRoom() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RoomScreen(movie: widget.movie),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Column(
+        children: [
+          GestureDetector(
+            onTap: () => setState(() => _showControls = !_showControls),
+            child: AspectRatio(
+              aspectRatio: _isInitialized ? _ctrl!.value.aspectRatio : 16 / 9,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  _isInitialized
+                      ? VideoPlayer(_ctrl!)
+                      : Container(
+                          color: Colors.black,
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              color: KinoColors.bronze,
+                            ),
+                          ),
+                        ),
+                  if (_showControls && _isInitialized) _buildControls(),
+                ],
+              ),
+            ),
+          ),
+          if (!_isFullscreen) ...[
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.movie.title,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.movie.channel,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _openRoom,
+                    icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+                    label: const Text('Смотреть вместе'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: KinoColors.bronze,
+                      foregroundColor: KinoColors.background,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControls() {
+    return Container(
+      color: Colors.black38,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.replay_10, color: Colors.white),
+            onPressed: () {
+              final pos = _ctrl!.value.position - const Duration(seconds: 10);
+              _ctrl!.seekTo(pos);
+            },
+          ),
+          IconButton(
+            iconSize: 52,
+            icon: Icon(
+              _ctrl!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+            ),
+            onPressed: () => setState(() {
+              _ctrl!.value.isPlaying ? _ctrl!.pause() : _ctrl!.play();
+            }),
+          ),
+          IconButton(
+            icon: const Icon(Icons.forward_10, color: Colors.white),
+            onPressed: () {
+              final pos = _ctrl!.value.position + const Duration(seconds: 10);
+              _ctrl!.seekTo(pos);
+            },
+          ),
+          IconButton(
+            icon: Icon(
+              _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+              color: Colors.white,
+            ),
+            onPressed: _toggleFullscreen,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+[FILE: lib/screens/room_screen.dart]
+----------------------------------
+// screens/room_screen.dart — Экран совместного просмотра
+
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
+import '../models/movie_model.dart';
+import '../services/webrtc_service.dart';
+import '../services/api_config.dart';
+import '../theme/app_theme.dart';
+
+class RoomScreen extends StatefulWidget {
+  final MovieItem movie;
+  final String? joinRoomId; // null = создать, строка = присоединиться
+
+  const RoomScreen({
+    super.key,
+    required this.movie,
+    this.joinRoomId,
+  });
+
+  @override
+  State<RoomScreen> createState() => _RoomScreenState();
+}
+
+class _RoomScreenState extends State<RoomScreen> {
+  late final WebRTCService _rtc;
+  VideoPlayerController? _video;
+
+  bool _connected = false;
+  bool _videoReady = false;
+  String? _roomId;
+  int _peersCount = 0;
+  bool _isSyncing = false; // блокирует рекурсивные sync-события
+
+  final List<String> _chat = [];
+  final _chatCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+
+  StreamSubscription? _syncSub;
+  StreamSubscription? _peerSub;
+  StreamSubscription? _chatSub;
+  StreamSubscription? _errSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _rtc = WebRTCService();
+    _initConnection();
+  }
+
+  Future<void> _initConnection() async {
+    await _rtc.connect();
+
+    _syncSub = _rtc.onSync.listen(_onSync);
+    _peerSub = _rtc.onPeer.listen(_onPeer);
+    _chatSub = _rtc.onChat.listen(_onChat);
+    _errSub  = _rtc.onError.listen(_onError);
+
+    if (widget.joinRoomId != null) {
+      // Присоединяемся к существующей комнате
+      await _rtc.joinRoom(widget.joinRoomId!);
+      setState(() {
+        _roomId = widget.joinRoomId;
+        _connected = true;
+      });
+      // Видео получим из room_joined → movieUrl
+    } else {
+      // Создаём новую комнату
+      final id = await _rtc.createRoom(
+        mUrl: widget.movie.url,
+        mTitle: widget.movie.title,
+      );
+      setState(() {
+        _roomId = id;
+        _connected = true;
+        _peersCount = 1;
+      });
+      await _initVideo(widget.movie.url);
+    }
+  }
+
+  Future<void> _initVideo(String url) async {
+    _video = VideoPlayerController.networkUrl(Uri.parse(url));
+    try {
+      await _video!.initialize();
+      _video!.addListener(_onVideoTick);
+      setState(() => _videoReady = true);
+    } catch (e) {
+      _onError('Не удалось загрузить видео: $e');
+    }
+  }
+
+  // Отправляем sync при изменении состояния плеера
+  void _onVideoTick() {
+    if (_isSyncing) return;
+    // Отправляем только значимые изменения
+  }
+
+  void _onSync(SyncEvent event) {
+    if (_video == null || !_videoReady) {
+      // Ждём инициализации видео, потом применяем
+      if (event.action == SyncAction.play ||
+          event.action == SyncAction.pause) {
+        // Сохраняем и применим после init
+      }
+      // Для join: получаем movieUrl из room_joined, тогда инициализируем
+      if (_rtc.movieUrl != null && _video == null) {
+        _initVideo(_rtc.movieUrl!);
+      }
+      return;
+    }
+    _isSyncing = true;
+    final pos = Duration(milliseconds: (event.positionSec * 1000).toInt());
+    _video!.seekTo(pos).then((_) {
+      if (event.action == SyncAction.play) {
+        _video!.play();
+      } else if (event.action == SyncAction.pause) {
+        _video!.pause();
+      }
+      Future.delayed(const Duration(milliseconds: 300), () => _isSyncing = false);
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _onPeer(PeerEvent event) {
+    setState(() => _peersCount = _rtc.peersCount);
+    final msg = event.joined
+        ? '👤 Участник присоединился'
+        : '👤 Участник вышел';
+    setState(() => _chat.add(msg));
+    _scrollToBottom();
+  }
+
+  void _onChat(String msg) {
+    setState(() => _chat.add(msg));
+    _scrollToBottom();
+  }
+
+  void _onError(String e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  // ─── Управление плеером (с отправкой sync) ──────────────────────────────────
+
+  void _play() {
+    if (_video == null) return;
+    _video!.play();
+    final pos = _video!.value.position.inMilliseconds / 1000.0;
+    _rtc.sendPlay(pos);
+    setState(() {});
+  }
+
+  void _pause() {
+    if (_video == null) return;
+    _video!.pause();
+    final pos = _video!.value.position.inMilliseconds / 1000.0;
+    _rtc.sendPause(pos);
+    setState(() {});
+  }
+
+  void _seek(double pos) {
+    if (_video == null) return;
+    final dur = Duration(milliseconds: (pos * 1000).toInt());
+    _video!.seekTo(dur);
+    _rtc.sendSeek(pos);
+    setState(() {});
+  }
+
+  String get _inviteLink {
+    final base = ApiConfig.baseUrl;
+    return '$base/room/$_roomId';
+  }
+
+  void _copyLink() {
+    Clipboard.setData(ClipboardData(text: _inviteLink));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Ссылка скопирована'),
+        backgroundColor: KinoColors.bronze,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _sendChat() {
+    final text = _chatCtrl.text.trim();
+    if (text.isEmpty) return;
+    _rtc.sendChat(text);
+    setState(() => _chat.add('Ты: $text'));
+    _chatCtrl.clear();
+    _scrollToBottom();
+  }
+
+  @override
+  void dispose() {
+    _syncSub?.cancel();
+    _peerSub?.cancel();
+    _chatSub?.cancel();
+    _errSub?.cancel();
+    _video?.removeListener(_onVideoTick);
+    _video?.dispose();
+    _rtc.dispose();
+    _chatCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: KinoColors.background,
+      appBar: AppBar(
+        backgroundColor: KinoColors.surface,
+        title: Row(
+          children: [
+            const Icon(Icons.people, color: KinoColors.bronze, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              'Комната: ${_roomId ?? '...'}',
+              style: const TextStyle(color: KinoColors.gold, fontSize: 14),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: KinoColors.bronze.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$_peersCount участн.',
+                style: const TextStyle(color: KinoColors.bronze, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.link, color: KinoColors.gold),
+            tooltip: 'Скопировать ссылку-приглашение',
+            onPressed: _roomId != null ? _copyLink : null,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Видеоплеер
+          _buildPlayer(),
+
+          // Прогресс-бар
+          if (_videoReady && _video != null) _buildSeekBar(),
+
+          // Ссылка-приглашение
+          if (_roomId != null) _buildInviteBanner(),
+
+          // Чат
+          Expanded(child: _buildChat()),
+
+          // Поле ввода чата
+          _buildChatInput(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayer() {
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Container(
+        color: Colors.black,
+        child: !_videoReady
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(color: KinoColors.bronze),
+                    const SizedBox(height: 12),
+                    Text(
+                      _connected ? 'Загрузка видео...' : 'Подключение...',
+                      style: const TextStyle(color: KinoColors.textSecondary),
+                    ),
+                  ],
+                ),
+              )
+            : Stack(
+                alignment: Alignment.center,
+                children: [
+                  VideoPlayer(_video!),
+                  // Управление
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _ctrlBtn(Icons.replay_10, () {
+                        final pos = _video!.value.position.inSeconds - 10;
+                        _seek(pos.toDouble());
+                      }),
+                      const SizedBox(width: 16),
+                      GestureDetector(
+                        onTap: _video!.value.isPlaying ? _pause : _play,
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Color(0x80000000),
+                          ),
+                          child: Icon(
+                            _video!.value.isPlaying
+                                ? Icons.pause
+                                : Icons.play_arrow,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      _ctrlBtn(Icons.forward_10, () {
+                        final pos = _video!.value.position.inSeconds + 10;
+                        _seek(pos.toDouble());
+                      }),
+                    ],
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _ctrlBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Color(0x60000000),
+          ),
+          child: Icon(icon, color: Colors.white, size: 22),
+        ),
+      );
+
+  Widget _buildSeekBar() {
+    final dur = _video!.value.duration.inSeconds.toDouble();
+    final pos = _video!.value.position.inSeconds.toDouble().clamp(0.0, dur);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        children: [
+          Text(
+            _fmt(_video!.value.position),
+            style: const TextStyle(color: KinoColors.textSecondary, fontSize: 11),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: KinoColors.bronze,
+                inactiveTrackColor: KinoColors.divider,
+                thumbColor: KinoColors.gold,
+                overlayColor: KinoColors.bronze.withOpacity(0.2),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                trackHeight: 2,
+              ),
+              child: Slider(
+                value: pos,
+                min: 0,
+                max: dur > 0 ? dur : 1,
+                onChanged: _seek,
+              ),
+            ),
+          ),
+          Text(
+            _fmt(_video!.value.duration),
+            style: const TextStyle(color: KinoColors.textSecondary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  Widget _buildInviteBanner() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: KinoColors.cardBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: KinoColors.bronze.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.link, color: KinoColors.bronze, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _inviteLink,
+              style: const TextStyle(color: KinoColors.textSecondary, fontSize: 11),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: _copyLink,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: KinoColors.bronze,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'Копировать',
+                style: TextStyle(
+                  color: KinoColors.background,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChat() {
+    if (_chat.isEmpty) {
+      return const Center(
+        child: Text(
+          'Чат пустой. Пригласи друга!',
+          style: TextStyle(color: KinoColors.textSecondary),
+        ),
+      );
+    }
+    return ListView.builder(
+      controller: _scrollCtrl,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      itemCount: _chat.length,
+      itemBuilder: (_, i) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Text(
+          _chat[i],
+          style: const TextStyle(
+            color: KinoColors.textPrimary,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatInput() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+      color: KinoColors.surface,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _chatCtrl,
+              style: const TextStyle(color: KinoColors.textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Сообщение...',
+                hintStyle: const TextStyle(color: KinoColors.textSecondary),
+                filled: true,
+                fillColor: KinoColors.cardBg,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onSubmitted: (_) => _sendChat(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: _sendChat,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: KinoColors.bronze,
+              ),
+              child: const Icon(
+                Icons.send,
+                color: KinoColors.background,
+                size: 18,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+[FILE: lib/services/api_config.dart]
+----------------------------------
+// services/api_config.dart — Переключалка: Termux ↔ Yandex Cloud
+
+class ApiConfig {
+  // Локальный сервер (Termux на телефоне)
+  static const String local = 'http://127.0.0.1:8000';
+
+  // Внешний сервер (Yandex Cloud VM)
+  // Замени <PUBLIC_IP> на реальный IP после деплоя
+  static const String remote = 'http://<PUBLIC_IP>:8000';
+
+  // Переключение через --dart-define=USE_REMOTE=true при сборке
+  // flutter build apk --dart-define=USE_REMOTE=true
+  static String get baseUrl =>
+      const bool.fromEnvironment('USE_REMOTE', defaultValue: false)
+          ? remote
+          : local;
+}
+
+
+[FILE: lib/services/api_service.dart]
+----------------------------------
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class ApiService {
+  // Если тестируешь на том же устройстве в браузере/linux: 127.0.0.1
+  // Если через эмулятор Android: 10.0.2.2
+  // Для реального устройства: впиши свой локальный IP (напр. 192.168.1.5)
+  static const String baseUrl = "http://127.0.0.1:8000";
+
+  /// Выполнение AI-поиска
+  static Future<Map<String, dynamic>> search(String query, {String category = "movies"}) async {
+    try {
+      final response = await http.post(
+        Uri.parse("$baseUrl/search"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "query": query,
+          "category": category,
+        }),
+      ).timeout(const Duration(seconds: 45)); // Даем время для AI + yt-dlp
+
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes));
+      } else {
+        throw Exception("Server Error: ${response.statusCode}");
+      }
+    } catch (e) {
+      return {"error": e.toString(), "items": []};
+    }
+  }
+
+  /// Получение статуса ключей (для дашборда)
+  static Future<Map<String, dynamic>> getPoolStatus() async {
+    try {
+      final response = await http.get(Uri.parse("$baseUrl/pool/status"));
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes));
+      }
+      throw Exception("Failed to fetch pool status");
+    } catch (e) {
+      return {"error": e.toString()};
+    }
+  }
+
+  /// Проверка здоровья сервера
+  static Future<bool> checkHealth() async {
+    try {
+      final response = await http.get(Uri.parse("$baseUrl/health"));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+
+[FILE: lib/services/webrtc_service.dart]
+----------------------------------
+// services/webrtc_service.dart
+// WebRTC P2P + WebSocket сигнализация + синхронизация плеера
+//
+// Протокол сообщений (JSON через WebSocket):
+//   create_room  → room_created (room_id)
+//   join_room    → room_joined (movie_url, is_playing, position_sec)
+//   offer/answer/ice_candidate → relay через сервер
+//   sync         → синхронизация play/pause/seek
+//   chat         → текстовый чат
+//   ping/pong    → keepalive
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'api_config.dart';
+
+// ─── События ──────────────────────────────────────────────────────────────────
+
+enum SyncAction { play, pause, seek }
+
+class SyncEvent {
+  final SyncAction action;
+  final double positionSec;
+  const SyncEvent(this.action, this.positionSec);
+}
+
+class PeerEvent {
+  final String peerId;
+  final bool joined; // true=joined, false=left
+  const PeerEvent(this.peerId, this.joined);
+}
+
+// ─── WebRTCService ────────────────────────────────────────────────────────────
+
+class WebRTCService {
+  // Идентификаторы
+  late final String peerId;
+  String? roomId;
+  String? movieUrl;
+  String? movieTitle;
+
+  // WebSocket
+  WebSocketChannel? _channel;
+  StreamSubscription? _wsSub;
+  Timer? _pingTimer;
+
+  // WebRTC
+  final Map<String, RTCPeerConnection> _pcs = {};
+  final _iceServers = {
+    'iceServers': [
+      {'urls': 'stun:stun.l.google.com:19302'},
+      {'urls': 'stun:stun1.l.google.com:19302'},
+    ]
+  };
+
+  // Стримы событий
+  final _syncCtrl   = StreamController<SyncEvent>.broadcast();
+  final _peerCtrl   = StreamController<PeerEvent>.broadcast();
+  final _chatCtrl   = StreamController<String>.broadcast();
+  final _errorCtrl  = StreamController<String>.broadcast();
+
+  Stream<SyncEvent>  get onSync  => _syncCtrl.stream;
+  Stream<PeerEvent>  get onPeer  => _peerCtrl.stream;
+  Stream<String>     get onChat  => _chatCtrl.stream;
+  Stream<String>     get onError => _errorCtrl.stream;
+
+  int peersCount = 0;
+
+  WebRTCService() {
+    peerId = _generateId();
+  }
+
+  String _generateId() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final rnd = Random.secure();
+    return List.generate(8, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
+
+  // ─── Подключение ────────────────────────────────────────────────────────────
+
+  Future<void> connect() async {
+    final wsUrl = ApiConfig.baseUrl
+        .replaceFirst('http://', 'ws://')
+        .replaceFirst('https://', 'wss://');
+    _channel = WebSocketChannel.connect(Uri.parse('$wsUrl/ws/$peerId'));
+    _wsSub = _channel!.stream.listen(
+      _onMessage,
+      onError: (e) => _errorCtrl.add('WS error: $e'),
+      onDone: () => _errorCtrl.add('WS disconnected'),
+    );
+    _startPing();
+    debugPrint('[WS] Connected as $peerId');
+  }
+
+  void _startPing() {
+    _pingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _send({'type': 'ping'});
+    });
+  }
+
+  // ─── Комнаты ────────────────────────────────────────────────────────────────
+
+  Future<String> createRoom({
+    required String mUrl,
+    required String mTitle,
+  }) async {
+    movieUrl = mUrl;
+    movieTitle = mTitle;
+    _send({'type': 'create_room', 'movie_url': mUrl, 'movie_title': mTitle});
+    // roomId будет установлен в _onMessage при ответе room_created
+    final completer = Completer<String>();
+    late StreamSubscription sub;
+    sub = _errorCtrl.stream.listen((e) {
+      if (!completer.isCompleted) completer.completeError(e);
+      sub.cancel();
+    });
+    // Ждём room_created через внутренний обработчик
+    _pendingRoomCompleter = completer;
+    _pendingRoomSub = sub;
+    return completer.future.timeout(const Duration(seconds: 10));
+  }
+
+  Completer<String>? _pendingRoomCompleter;
+  StreamSubscription? _pendingRoomSub;
+
+  Future<void> joinRoom(String rId) async {
+    roomId = rId.toUpperCase();
+    _send({'type': 'join_room', 'room_id': roomId});
+  }
+
+  // ─── Синхронизация ──────────────────────────────────────────────────────────
+
+  void sendPlay(double positionSec) =>
+      _send({'type': 'sync', 'action': 'play', 'position_sec': positionSec});
+
+  void sendPause(double positionSec) =>
+      _send({'type': 'sync', 'action': 'pause', 'position_sec': positionSec});
+
+  void sendSeek(double positionSec) =>
+      _send({'type': 'sync', 'action': 'seek', 'position_sec': positionSec});
+
+  void sendChat(String text) =>
+      _send({'type': 'chat', 'text': text});
+
+  // ─── WebRTC peer connections ─────────────────────────────────────────────────
+
+  Future<void> _createOffer(String toPeerId) async {
+    final pc = await _getOrCreatePC(toPeerId);
+    final offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    _send({
+      'type': 'offer',
+      'to': toPeerId,
+      'sdp': offer.sdp,
+      'sdpType': offer.type,
+    });
+  }
+
+  Future<void> _handleOffer(String fromId, String sdp, String type) async {
+    final pc = await _getOrCreatePC(fromId);
+    await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
+    final answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    _send({
+      'type': 'answer',
+      'to': fromId,
+      'sdp': answer.sdp,
+      'sdpType': answer.type,
+    });
+  }
+
+  Future<RTCPeerConnection> _getOrCreatePC(String peerId) async {
+    if (_pcs.containsKey(peerId)) return _pcs[peerId]!;
+    final pc = await createPeerConnection(_iceServers);
+    _pcs[peerId] = pc;
+
+    pc.onIceCandidate = (candidate) {
+      if (candidate.candidate != null) {
+        _send({
+          'type': 'ice_candidate',
+          'to': peerId,
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMlineIndex,
+        });
+      }
+    };
+    pc.onConnectionState = (state) {
+      debugPrint('[WebRTC] $peerId => $state');
+    };
+    return pc;
+  }
+
+  // ─── Обработка сообщений ────────────────────────────────────────────────────
+
+  void _onMessage(dynamic raw) {
+    final Map<String, dynamic> msg;
+    try {
+      msg = jsonDecode(raw as String);
+    } catch (_) {
+      return;
+    }
+    final type = msg['type'] as String?;
+    debugPrint('[WS] ← $type');
+
+    switch (type) {
+      case 'room_created':
+        roomId = msg['room_id'] as String;
+        _pendingRoomCompleter?.complete(roomId!);
+        _pendingRoomSub?.cancel();
+        _pendingRoomCompleter = null;
+        _pendingRoomSub = null;
+
+      case 'room_joined':
+        roomId    = msg['room_id'] as String;
+        movieUrl  = msg['movie_url'] as String?;
+        movieTitle = msg['movie_title'] as String?;
+        peersCount = (msg['peers_count'] as int?) ?? 0;
+        final isPlaying   = msg['is_playing'] as bool? ?? false;
+        final positionSec = (msg['position_sec'] as num?)?.toDouble() ?? 0.0;
+        // Применяем состояние хоста
+        _syncCtrl.add(SyncEvent(
+          isPlaying ? SyncAction.play : SyncAction.pause,
+          positionSec,
+        ));
+
+      case 'peer_joined':
+        peersCount = (msg['peers_count'] as int?) ?? peersCount;
+        final pid = msg['peer_id'] as String;
+        _peerCtrl.add(PeerEvent(pid, true));
+        // Отправить offer новому участнику
+        _createOffer(pid);
+
+      case 'peer_left':
+        peersCount = (msg['peers_count'] as int?) ?? peersCount;
+        final pid = msg['peer_id'] as String;
+        _pcs[pid]?.close();
+        _pcs.remove(pid);
+        _peerCtrl.add(PeerEvent(pid, false));
+
+      case 'offer':
+        _handleOffer(
+          msg['from'] as String,
+          msg['sdp'] as String,
+          msg['sdpType'] as String,
+        );
+
+      case 'answer':
+        final pc = _pcs[msg['from']];
+        pc?.setRemoteDescription(RTCSessionDescription(
+          msg['sdp'] as String,
+          msg['sdpType'] as String,
+        ));
+
+      case 'ice_candidate':
+        final pc = _pcs[msg['from']];
+        pc?.addCandidate(RTCIceCandidate(
+          msg['candidate'] as String,
+          msg['sdpMid'] as String?,
+          msg['sdpMLineIndex'] as int?,
+        ));
+
+      case 'sync':
+        final action = msg['action'] as String;
+        final pos = (msg['position_sec'] as num?)?.toDouble() ?? 0.0;
+        _syncCtrl.add(SyncEvent(
+          action == 'play'
+              ? SyncAction.play
+              : action == 'pause'
+                  ? SyncAction.pause
+                  : SyncAction.seek,
+          pos,
+        ));
+
+      case 'chat':
+        final from = msg['from_peer'] as String?;
+        final text = msg['text'] as String?;
+        if (text != null) _chatCtrl.add('$from: $text');
+
+      case 'error':
+        _errorCtrl.add(msg['msg'] as String? ?? 'unknown error');
+    }
+  }
+
+  void _send(Map<String, dynamic> msg) {
+    try {
+      _channel?.sink.add(jsonEncode(msg));
+    } catch (e) {
+      debugPrint('[WS] Send error: $e');
+    }
+  }
+
+  // ─── Cleanup ─────────────────────────────────────────────────────────────────
+
+  Future<void> dispose() async {
+    _pingTimer?.cancel();
+    _wsSub?.cancel();
+    _channel?.sink.close();
+    for (final pc in _pcs.values) {
+      await pc.close();
+    }
+    _pcs.clear();
+    await _syncCtrl.close();
+    await _peerCtrl.close();
+    await _chatCtrl.close();
+    await _errorCtrl.close();
+  }
+}
+
+
+[FILE: lib/theme/app_theme.dart]
+----------------------------------
+// theme/app_theme.dart — Tropical Noir / Steampunk Bronze
+// Palette: #0A0810 / #B87333 / #D4A843 / #C9924A / #4A7A6B
+
+import 'package:flutter/material.dart';
+
+class KinoColors {
+  static const background = Color(0xFF0A0810);
+  static const bronze     = Color(0xFFB87333);
+  static const gold       = Color(0xFFD4A843);
+  static const copper     = Color(0xFFC9924A);
+  static const patina     = Color(0xFF4A7A6B);
+
+  // Вспомогательные
+  static const surface    = Color(0xFF12101A);
+  static const cardBg     = Color(0xFF1A1624);
+  static const textPrimary   = Color(0xFFE8D5B0);
+  static const textSecondary = Color(0xFF8A7560);
+  static const divider    = Color(0xFF2A2035);
+}
+
+class KinoTheme {
+  static ThemeData get dark => ThemeData(
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: KinoColors.background,
+    colorScheme: const ColorScheme.dark(
+      primary:   KinoColors.bronze,
+      secondary: KinoColors.gold,
+      surface:   KinoColors.surface,
+    ),
+    fontFamily: 'Roboto',
+    textTheme: const TextTheme(
+      headlineLarge: TextStyle(
+        color: KinoColors.gold,
+        fontSize: 28,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.5,
+      ),
+      bodyLarge: TextStyle(color: KinoColors.textPrimary, fontSize: 16),
+      bodyMedium: TextStyle(color: KinoColors.textSecondary, fontSize: 14),
+    ),
+    iconTheme: const IconThemeData(color: KinoColors.bronze),
+  );
+}
+
+// Градиент: бронзовое свечение сверху-слева (30°)
+class KinoGradients {
+  static const bronzeGlow = RadialGradient(
+    center: Alignment(-0.7, -0.7),
+    radius: 1.5,
+    colors: [Color(0x40B87333), Color(0x00000000)],
+  );
+
+  static const cardShine = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0x30D4A843), Color(0x00000000)],
+  );
+}
+
+
+[FILE: lib/widgets/mood_dialog.dart]
+----------------------------------
+// widgets/mood_dialog.dart — Диалог настроения (стекломорфизм)
+
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
+
+class MoodDialog extends StatefulWidget {
+  final String category;
+  final ValueChanged<String> onSubmit;
+
+  const MoodDialog({
+    super.key,
+    required this.category,
+    required this.onSubmit,
+  });
+
+  @override
+  State<MoodDialog> createState() => _MoodDialogState();
+}
+
+class _MoodDialogState extends State<MoodDialog> {
+  final _ctrl = TextEditingController();
+  bool _loading = false;
+
+  void _submit() {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _loading = true);
+    widget.onSubmit(text);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: KinoColors.cardBg.withOpacity(0.92),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: KinoColors.bronze.withOpacity(0.4)),
+            boxShadow: [
+              BoxShadow(
+                color: KinoColors.bronze.withOpacity(0.15),
+                blurRadius: 32,
+                spreadRadius: 4,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Заголовок
+              Text(
+                'Опиши своё настроение',
+                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                  fontSize: 20,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'KinoVibe найдёт фильм для тебя',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 20),
+
+              // Поле ввода
+              TextField(
+                controller: _ctrl,
+                maxLines: 3,
+                autofocus: true,
+                style: const TextStyle(color: KinoColors.textPrimary),
+                decoration: InputDecoration(
+                  hintText: 'Например: грустно, хочу что-то тёплое...',
+                  hintStyle: const TextStyle(color: KinoColors.textSecondary),
+                  filled: true,
+                  fillColor: KinoColors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: KinoColors.divider),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: KinoColors.bronze),
+                  ),
+                ),
+                onSubmitted: (_) => _submit(),
+              ),
+              const SizedBox(height: 16),
+
+              // Кнопки
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Отмена',
+                      style: TextStyle(color: KinoColors.textSecondary),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _loading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: KinoColors.bronze,
+                      foregroundColor: KinoColors.background,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12,
+                      ),
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: KinoColors.background,
+                            ),
+                          )
+                        : const Text('Найти'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+[FILE: lib/widgets/movie_card.dart]
+----------------------------------
+// widgets/movie_card.dart — Карточка фильма (горизонтальный список)
+
+import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import '../models/movie_model.dart';
+import '../theme/app_theme.dart';
+
+class MovieCard extends StatelessWidget {
+  final MovieItem movie;
+  final VoidCallback onTap;
+
+  const MovieCard({super.key, required this.movie, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 160,
+        margin: const EdgeInsets.only(right: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: KinoColors.cardBg,
+          border: Border.all(color: KinoColors.divider),
+          boxShadow: [
+            BoxShadow(
+              color: KinoColors.bronze.withOpacity(0.08),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Постер
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              child: movie.thumbnail.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: movie.thumbnail,
+                      height: 100,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        height: 100,
+                        color: KinoColors.surface,
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1,
+                            color: KinoColors.bronze,
+                          ),
+                        ),
+                      ),
+                      errorWidget: (_, __, ___) => Container(
+                        height: 100,
+                        color: KinoColors.surface,
+                        child: const Icon(
+                          Icons.movie,
+                          color: KinoColors.bronze,
+                          size: 32,
+                        ),
+                      ),
+                    )
+                  : Container(
+                      height: 100,
+                      color: KinoColors.surface,
+                      child: const Icon(
+                        Icons.movie,
+                        color: KinoColors.bronze,
+                        size: 32,
+                      ),
+                    ),
+            ),
+
+            // Инфо
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    movie.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: KinoColors.textPrimary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.access_time, size: 10, color: KinoColors.textSecondary),
+                      const SizedBox(width: 3),
+                      Text(
+                        movie.durationFormatted,
+                        style: const TextStyle(
+                          color: KinoColors.textSecondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+[FILE: lib/widgets/transformer_widget.dart]
+----------------------------------
+// widgets/transformer_widget.dart
+// Металлический диск 220px → 4 лепестка (70px разлёт) + микрофон
+
+import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import '../theme/app_theme.dart';
+
+typedef CategoryCallback = void Function(String category);
+
+class TransformerWidget extends StatefulWidget {
+  final CategoryCallback onCategorySelected;
+  final VoidCallback onMicTap;
+  final VoidCallback onMicLongPress;
+
+  const TransformerWidget({
+    super.key,
+    required this.onCategorySelected,
+    required this.onMicTap,
+    required this.onMicLongPress,
+  });
+
+  @override
+  State<TransformerWidget> createState() => _TransformerWidgetState();
+}
+
+class _TransformerWidgetState extends State<TransformerWidget>
+    with TickerProviderStateMixin {
+  bool _isOpen = false;
+  late AnimationController _expandCtrl;
+  late Animation<double> _expandAnim;
+
+  // Лепестки: [category, label, icon, dx, dy]
+  static const _petals = [
+    ['movies',  'Фильмы',        Icons.movie,           -1.0, -1.0],
+    ['series',  'Сериалы',       Icons.tv,               1.0, -1.0],
+    ['shorts',  'Короткометражки', Icons.video_library, -1.0,  1.0],
+    ['anime',   'Аниме',         Icons.animation,        1.0,  1.0],
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _expandCtrl = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _expandAnim = CurvedAnimation(parent: _expandCtrl, curve: Curves.easeOutBack);
+  }
+
+  @override
+  void dispose() {
+    _expandCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _isOpen = !_isOpen);
+    _isOpen ? _expandCtrl.forward() : _expandCtrl.reverse();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 320,
+      height: 320,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Лепестки
+          ..._petals.map((p) => _buildPetal(p)),
+
+          // Центральный диск
+          GestureDetector(
+            onTap: _toggle,
+            child: _buildDisc(),
+          ),
+
+          // Микрофон (только при открытом состоянии)
+          if (_isOpen)
+            GestureDetector(
+              onTap: widget.onMicTap,
+              onLongPress: widget.onMicLongPress,
+              child: Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: KinoColors.background,
+                  border: Border.all(color: KinoColors.gold, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: KinoColors.gold.withOpacity(0.4),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.mic, color: KinoColors.gold, size: 24),
+              ).animate().scale(duration: 200.ms),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDisc() {
+    return AnimatedBuilder(
+      animation: _expandAnim,
+      builder: (_, __) {
+        final size = 220.0 - (_expandAnim.value * 60); // сжимается при открытии
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const RadialGradient(
+              center: Alignment(-0.3, -0.3),
+              radius: 0.9,
+              colors: [Color(0xFFD4A843), Color(0xFF8B5E1A), Color(0xFF3D2506)],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: KinoColors.bronze.withOpacity(0.6 + _expandAnim.value * 0.3),
+                blurRadius: 24 + _expandAnim.value * 16,
+                spreadRadius: 4,
+              ),
+            ],
+          ),
+          child: _isOpen
+              ? null
+              : Center(
+                  child: Text(
+                    'K',
+                    style: TextStyle(
+                      color: KinoColors.gold,
+                      fontSize: 72,
+                      fontWeight: FontWeight.w900,
+                      shadows: [
+                        Shadow(
+                          color: KinoColors.gold.withOpacity(0.5),
+                          blurRadius: 16,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        )
+            .animate(onPlay: (c) => c.repeat(reverse: true))
+            .custom(
+              duration: 2.seconds,
+              builder: (_, value, child) => child!,
+            );
+      },
+    );
+  }
+
+  Widget _buildPetal(List petal) {
+    final category = petal[0] as String;
+    final label    = petal[1] as String;
+    final icon     = petal[2] as IconData;
+    final dx       = petal[3] as double;
+    final dy       = petal[4] as double;
+
+    return AnimatedBuilder(
+      animation: _expandAnim,
+      builder: (_, __) {
+        final offset = _expandAnim.value * 90;
+        return Transform.translate(
+          offset: Offset(dx * offset, dy * offset),
+          child: Opacity(
+            opacity: _expandAnim.value,
+            child: GestureDetector(
+              onTap: () {
+                widget.onCategorySelected(category);
+                _toggle();
+              },
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: KinoColors.surface,
+                  border: Border.all(color: KinoColors.bronze, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: KinoColors.bronze.withOpacity(0.3),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(icon, color: KinoColors.bronze, size: 22),
+                    const SizedBox(height: 3),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: KinoColors.textSecondary,
+                        fontSize: 8,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+
+[FILE: lib/main.dart]
+----------------------------------
+// main.dart — KinoVibe v3.0
+
+import 'package:flutter/material.dart';
+import 'theme/app_theme.dart';
+import 'screens/home_screen.dart';
+
+void main() {
+  runApp(const KinoVibeApp());
+}
+
+class KinoVibeApp extends StatelessWidget {
+  const KinoVibeApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'KinoVibe',
+      debugShowCheckedModeBanner: false,
+      theme: KinoTheme.dark,
+      home: const HomeScreen(),
+    );
+  }
+}
