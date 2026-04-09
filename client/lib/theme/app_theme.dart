@@ -15,6 +15,7 @@ class KinoColors {
   static const cardBg     = Color(0xFF1A1624);
   static const textPrimary   = Color(0xFFE8D5B0);
   static const textSecondary = Color(0xFF8A7560);
+  static const muted         = Color(0xFF8A7560); // alias for textSecondary
   static const divider    = Color(0xFF2A2035);
 }
 

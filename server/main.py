@@ -1,23 +1,36 @@
-# ============================================
-# server/main.py
-# DATE: 2026-04-09
-# PURPOSE: FastAPI Hub (WebRTC Signaling + AI Search Gateway)
-# VERSION: 3.5.0
-# ============================================
+"""
+main.py — KinoVibe API Server v3.1
+FastAPI + Uvicorn + WebSocket signaling
+Endpoints:
+  GET  /health
+  GET  /pool/status
+  POST /search
+  POST /rooms/create
+  GET  /rooms
+  WS   /ws/{peer_id}
+"""
 
+import logging
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict
+from search import search_videos
+from key_pool import get_pool
+from signaling import get_signaling
 
-# Импорт наших модулей
-from core.key_pool import get_pool
-from search import execute_search
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s >> %(name)s >> %(levelname)s >> %(message)s",
+)
+logger = logging.getLogger("kinovibe")
 
-app = FastAPI(title="KINOVIBE Backend", version="3.5.0")
+app = FastAPI(
+    title="KinoVibe API",
+    version="3.0.0",
+    description="Кинематографический AI. Настроение → Фильм.",
+)
 
-# Настройка CORS для мобильных и web-клиентов
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,73 +38,107 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Модели данных ────────────────────────────────────────────────────────────
+
+# ─── Модели ───────────────────────────────────────────────────────────────────
 
 class SearchRequest(BaseModel):
     query: str
     category: str = "movies"
 
-# ─── Эндпоинты управления и диагностики ───────────────────────────────────────
+
+class CreateRoomRequest(BaseModel):
+    movie_url: str = ""
+    movie_title: str = ""
+
+
+# ─── Эндпоинты ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
-async def health_check():
-    """Проверка доступности сервера."""
-    return {"status": "online", "engine": "Gemini 2.5 Flash SDK"}
+async def health():
+    return {"status": "ok", "version": "3.1.0", "service": "KinoVibe"}
+
 
 @app.get("/pool/status")
-async def get_key_status():
-    """Проверка состояния API-ключей Gemini и Groq."""
-    pool = get_pool()
-    return pool.status()
+async def pool_status():
+    return get_pool().status()
 
-# ─── Эндпоинт AI-поиска ───────────────────────────────────────────────────────
 
 @app.post("/search")
-async def run_search(request: SearchRequest):
-    """Выполнение поиска через Gemini 2.5 SDK и yt-dlp."""
-    try:
-        results = await execute_search(request.query, request.category)
-        return results
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def search(req: SearchRequest):
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    logger.info(f"[SEARCH] >> query={req.query!r} category={req.category}")
+    result = await search_videos(req.query, req.category)
+    logger.info(f"[SEARCH] >> found {len(result['results'])} results")
+    return result
 
-# ─── WebSocket: WebRTC Signaling & Watch Party Sync ──────────────────────────
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, List[WebSocket]] = {}
+@app.get("/stream")
+async def get_stream_url(url: str):
+    """
+    Принимает webpage_url (youtube.com/watch?v=...)
+    Возвращает прямую ссылку на видеопоток через yt-dlp -g
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
 
-    async def connect(self, room_id: str, websocket: WebSocket):
-        await websocket.accept()
-        if room_id not in self.active_connections:
-            self.active_connections[room_id] = []
-        self.active_connections[room_id].append(websocket)
+    import asyncio, subprocess
+    logger.info(f"[STREAM] Extracting stream URL for: {url[:80]}")
 
-    def disconnect(self, room_id: str, websocket: WebSocket):
-        if room_id in self.active_connections:
-            self.active_connections[room_id].remove(websocket)
+    def _extract(u: str) -> dict:
+        # -f: лучшее качество с аудио, совместимое с мобильным плеером
+        # Пробуем несколько форматов по убыванию качества
+        for fmt in ["bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"]:
+            try:
+                r = subprocess.run(
+                    ["yt-dlp", "-g", "-f", fmt, "--no-playlist", u],
+                    capture_output=True, text=True, timeout=20
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    lines = r.stdout.strip().splitlines()
+                    # Если два URL (видео + аудио) — берём первый (видео)
+                    return {"stream_url": lines[0], "audio_url": lines[1] if len(lines) > 1 else None}
+            except Exception:
+                continue
+        return {}
 
-    async def broadcast(self, room_id: str, message: dict, sender: WebSocket):
-        if room_id in self.active_connections:
-            for connection in self.active_connections[room_id]:
-                if connection != sender:
-                    await connection.send_json(message)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _extract, url)
 
-manager = ConnectionManager()
+    if not result:
+        raise HTTPException(status_code=422, detail="Could not extract stream URL")
 
-@app.websocket("/ws/{room_id}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str):
-    await manager.connect(room_id, websocket)
-    try:
-        while True:
-            # Получаем сигнальные данные (SDP/ICE или Sync команды)
-            data = await websocket.receive_json()
-            await manager.broadcast(room_id, data, websocket)
-    except WebSocketDisconnect:
-        manager.disconnect(room_id, websocket)
+    logger.info(f"[STREAM] OK: {result['stream_url'][:60]}...")
+    return result
+
+
+@app.post("/rooms/create")
+async def create_room(req: CreateRoomRequest):
+    signaling = get_signaling()
+    room_id = signaling.create_room(
+        movie_url=req.movie_url,
+        movie_title=req.movie_title,
+    )
+    return {"room_id": room_id}
+
+
+@app.get("/rooms")
+async def list_rooms():
+    return get_signaling().room_list()
+
+
+@app.websocket("/ws/{peer_id}")
+async def websocket_endpoint(ws: WebSocket, peer_id: str):
+    await get_signaling().handle(ws, peer_id)
+
 
 # ─── Запуск ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Запуск на 0.0.0.0 для доступа из локальной сети Termux
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        log_level="info",
+    )

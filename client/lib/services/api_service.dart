@@ -1,52 +1,49 @@
+// services/api_service.dart — HTTP-клиент KinoVibe API
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'api_config.dart';
+import '../models/movie_model.dart';
 
 class ApiService {
-  // Если тестируешь на том же устройстве в браузере/linux: 127.0.0.1
-  // Если через эмулятор Android: 10.0.2.2
-  // Для реального устройства: впиши свой локальный IP (напр. 192.168.1.5)
-  static const String baseUrl = "http://127.0.0.1:8000";
+  static Future<SearchResult> search({
+    required String query,
+    String category = 'movies',
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/search');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'query': query, 'category': category}),
+    ).timeout(const Duration(seconds: 30));
 
-  /// Выполнение AI-поиска
-  static Future<Map<String, dynamic>> search(String query, {String category = "movies"}) async {
-    try {
-      final response = await http.post(
-        Uri.parse("$baseUrl/search"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "query": query,
-          "category": category,
-        }),
-      ).timeout(const Duration(seconds: 45)); // Даем время для AI + yt-dlp
-
-      if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
-      } else {
-        throw Exception("Server Error: ${response.statusCode}");
-      }
-    } catch (e) {
-      return {"error": e.toString(), "items": []};
+    if (response.statusCode != 200) {
+      throw Exception('API error: ${response.statusCode}');
     }
+    return SearchResult.fromJson(jsonDecode(response.body));
   }
 
-  /// Получение статуса ключей (для дашборда)
-  static Future<Map<String, dynamic>> getPoolStatus() async {
-    try {
-      final response = await http.get(Uri.parse("$baseUrl/pool/status"));
-      if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
-      }
-      throw Exception("Failed to fetch pool status");
-    } catch (e) {
-      return {"error": e.toString()};
+  /// Получить прямую ссылку на видеопоток по webpage_url
+  static Future<String> getStreamUrl(String webpageUrl) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/stream')
+        .replace(queryParameters: {'url': webpageUrl});
+    final response = await http.get(uri).timeout(const Duration(seconds: 25));
+    if (response.statusCode != 200) {
+      throw Exception('Stream extraction failed: ${response.statusCode}');
     }
+    final data = jsonDecode(response.body);
+    final streamUrl = data['stream_url'] as String?;
+    if (streamUrl == null || streamUrl.isEmpty) {
+      throw Exception('Empty stream URL');
+    }
+    return streamUrl;
   }
 
-  /// Проверка здоровья сервера
-  static Future<bool> checkHealth() async {
+  static Future<bool> healthCheck() async {
     try {
-      final response = await http.get(Uri.parse("$baseUrl/health"));
-      return response.statusCode == 200;
+      final uri = Uri.parse('${ApiConfig.baseUrl}/health');
+      final r = await http.get(uri).timeout(const Duration(seconds: 5));
+      return r.statusCode == 200;
     } catch (_) {
       return false;
     }
