@@ -10,6 +10,7 @@ import '../services/api_service.dart';
 import '../models/movie_model.dart';
 import 'player_screen.dart';
 import 'join_room_screen.dart';
+import 'local_file_screen.dart'; // Импорт нового экрана
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -107,15 +108,34 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: KinoColors.background,
-      floatingActionButton: FloatingActionButton.small(
-        backgroundColor: KinoColors.surface,
-        foregroundColor: KinoColors.bronze,
-        tooltip: 'Войти в комнату',
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const JoinRoomScreen()),
-        ),
-        child: const Icon(Icons.meeting_room_outlined),
+      // Используем Column для размещения нескольких FAB
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'local_files_btn', // Уникальный тег
+            backgroundColor: KinoColors.surface,
+            foregroundColor: KinoColors.bronze,
+            tooltip: 'Локальные файлы',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const LocalFileScreen()),
+            ),
+            child: const Icon(Icons.folder_open),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.small(
+            heroTag: 'join_room_btn', // Уникальный тег
+            backgroundColor: KinoColors.surface,
+            foregroundColor: KinoColors.bronze,
+            tooltip: 'Войти в комнату',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const JoinRoomScreen()),
+            ),
+            child: const Icon(Icons.meeting_room_outlined),
+          ),
+        ],
       ),
       body: Stack(
         children: [
